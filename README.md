@@ -2,188 +2,111 @@
 
 # **More Thought, Less Accuracy? On the Dual Nature of Reasoning in Vision-Language Models (ICLR 2026)**
 
-</div>
-
-<p align="center"><i>A sober look at the pros and cons of multimodal reasoning with comprehensive findings, and a new RL method as a multimodal replacement of GRPO, achieving new state-of-the-art results.</i></p>
-
-<div align="center">
-
 [![Project Page](https://img.shields.io/badge/🌐%20Project%20Page-Visit-blue)](https://xytian1008.github.io/VAPO/)
-[![arXiv](https://img.shields.io/badge/arXiv-2507.06448-b31b1b.svg)](https://arxiv.org/abs/2509.25848)
+[![arXiv](https://img.shields.io/badge/arXiv-2509.25848-b31b1b.svg)](https://arxiv.org/abs/2509.25848)
 [![GitHub](https://img.shields.io/badge/💻%20GitHub-Code-green)](https://github.com/xytian1008/VAPO)
+
 </div>
 
-This is the official implementation of the paper 'More Thought, Less Accuracy? On the Dual Nature of Reasoning in Vision-Language Models'.
+本仓库是 [VAPO](https://github.com/xytian1008/VAPO)（Vision-Anchored Policy Optimization，ICLR 2026）官方实现的 fork，也是本项目「Forgetting-Aware Visual Anchoring」的开发仓库。VAPO 是 GRPO 的多模态替代算法：在推理路径中嵌入视觉锚点（visual anchors），通过感知奖励（perception reward）鼓励模型在长推理中保持视觉依据，缓解视觉遗忘（visual forgetting）。官方数据集、权重等资源见下方[资源链接](#资源链接)。
 
-# News📰
+---
 
-* **`[2026/03/29]`:** 🔥 **We have released our training datasets.**
-* **`[2026/03/20]`:** 🔥 **We have released our code and models.**
-* **`[2026/01/25]`:** 🎉 **Our paper has been accepted to ICLR 2026!**
-* **`[2025/10/01]`:** 🔥 **We have released our paper [[Arxiv](https://arxiv.org/abs/2509.25848)].**
+# 📋 项目研究计划：Forgetting-Aware Visual Anchoring
 
-# Key Findings🔍
+> **项目 DDL：2026-12-13** ｜ 参考硬件：单机 8× A100 80GB（官方 7B 训练脚本默认配置）
+> 提案文件：[proposal-Forgetting-Aware Visual Anchoring for Hallucination Mitigation in Vision-Language Models.pdf](./proposal-Forgetting-Aware%20Visual%20Anchoring%20for%20Hallucination%20Mitigation%20in%20Vision-Language%20Models.pdf)
 
-![](./docs/static/figures/perception.svg "perception")
+本项目基于 VAPO，提出**遗忘感知的视觉锚定**：用轻量级遗忘风险预测器将 VAPO 固定时间权重 β 替换为输入自适应的 β(x)，缓解 VLM 长推理中的视觉遗忘。
 
-🌟 **Longer reasoning does not guarantee better performance**: By breaking down the reasoning chains, we observe that the early stages of reasoning significantly enhance model accuracy. However, as reasoning continues, this performance gain gradually saturates and may even begin to reverse in later stages.
+## 任务分工与进度规划（2026-11-18 → 2026-12-13）
 
-🌟 **The harder the model thinks, the worse the model sees**: Our error analysis reveals that prolonged reasoning is accompanied by an increase in perception errors, where the model incorrectly recognize or interpret visual details. This degradation in perceptual accuracy is a key factor underlying the negative effect of reasoning.
+| 模块 | 成员 | 工作内容 | 大致时间线 | 里程碑 / 产出 |
+|------|------|----------|------|----------------|
+| 环境与数据准备 | 全员 | 下载 36K 训练集、1K 验证集、Qwen2.5-VL-7B-Instruct 与 VAPO-Thinker-7B 权重 | 11.18 – 11.20 | 环境就绪、示例脚本跑通 |
+| 基线复现 + 视觉遗忘分析 | chw、whm（评测：zly） | ① 复现 Qwen2.5-VL-7B 评测基线、GRPO 与原始 VAPO-7B 训练；② 利用视觉 Claims/Labels 对比训练轨迹早期 vs 后期视觉事实检查结果，构建视觉遗忘数据集 | 11.20 – 12.02 | 三组基线结果；遗忘数据集 v1 |
+| 遗忘风险预测器 + 自适应奖励机制 | lh、jyc | ① 用冻结的图像/问题特征训练轻量预测器（held-out 任务类别验证迁移）；② 将 β(x) 接入 VAPO 奖励（预测器冻结），训练改进版 VAPO-7B | 12.01 – 12.10 | 预测器 v1；改进模型 checkpoint |
+| 模型评测与收尾 | zly  | ① 基线评测（基线就绪后提前开展）；② 在 HallusionBench、MMStar、MathVista 上完成四方法对比评测；③ 结果分析、报告/论文撰写 | 12.08 – 12.13 | 最终报告 |
 
-🌟 **The harms of reasoning are most evident in vision-heavy tasks**: In contrast to tasks with simple visual structures such as math, the adverse impact of reasoning on perception becomes more pronounced in vision-intensive problems involving high-resolution real-world images or perceptually elusive content.
+> 各模块时间有意重叠：预测器在遗忘数据集 v1 产出后启动，评测在基线就绪后即可提前开展；12.11–12.13 留作报告撰写与缓冲。
 
-![](./docs/static/figures/forget.svg "forget")
+> 可选扩展（时间允许时）：将改进方法迁移到 Qwen3.5-9B 视觉语言模型上验证。
 
-🌟 **Encouraging models to look more often boosts reasoning**: We find that the drawbacks brought by reasoning stem from visual forgetting, where extended textual output leads the model to increasingly disregard visual cues. Encouraging models to attend to visual input effectively raises the upperbound of reasoning performance.
+## 改进思路
 
-# Methodology📖
+VAPO 的感知奖励使用固定时间权重 β（手工调参）。本项目将其替换为输入依赖的 β(x)（预测器保持冻结、仅训练时使用，推理时无额外开销）：
 
-![](./docs/static/figures/method.png "method")
+```
+R_perc(x, o) = Σ_k e^{β(x)·t_k/T} · s_k / Σ_k e^{β(x)·t_k/T}
+R(x, o)     = R_acc + R_fmt + γ · 1[R_acc = 1] · R_perc(x, o)
+```
 
-We propose **Vision-Anchored Policy Optimization (VAPO)**, a simple yet effective policy gradient algorithm as a multimodal replacement of GRPO that explicitly steers the reasoning process toward visually grounded trajectories. The key idea of VAPO is to embed a sequence of visual anchors along the reasoning path. At each anchor point, the model's perceptual capability is probed by evaluating its responses to a set of primitive visual claims. Beyond standard outcome-based rewards such as accuracy and format, we introduce perception reward, which quantifies the model's overall perceptual grounding during reasoning by aggregating scores across all anchor points.
+- β(x) 越大，越强调推理后期（t_k/T 较大）的视觉检查；接近 0 时各检查权重趋于均匀。
+- β(x) 由轻量预测器给出，以「早期正确、后期答错的视觉事实比例」为监督信号，输入为冻结的图像/问题特征。
 
-# Main Results🗒️
+## 资源链接
 
-![](./docs/static/figures/result.png "result")
+### VAPO（基础方法）
 
-✅ **VAPO consistently improves accuracy across diverse benchmarks**: Our model outperforms recent reasoning models of the same scale on mathematical problems, achieving an average improvement of 2% (49.1% → 51.1%). The advantage is more pronounced on general-purpose tasks, where our method surpasses previous best results by 3.2% (59.9% → 63.1%), thereby establishing a new state of the art.
+| 资源 | 链接 |
+|------|------|
+| 论文（ICLR 2026） | https://arxiv.org/abs/2509.25848 |
+| 项目主页 | https://xytian1008.github.io/VAPO/ |
+| 官方代码仓库 | https://github.com/xytian1008/VAPO |
+| 训练数据（约 36K） | https://huggingface.co/datasets/xytian1008/VAPO-Thinker-train36k |
+| 验证数据（约 1K） | https://huggingface.co/datasets/xytian1008/VAPO-Thinker-val1k |
+| VAPO-Thinker-7B 基线权重 | https://huggingface.co/xytian1008/VAPO-Thinker-7B |
 
-![](./docs/static/figures/result2.svg "result")
+### 基础模型与数据
 
-✅ **VAPO fully releases the potentials of reasoning**: Compared with the baseline, our model demonstrates a more gentle decline in visual attention ratio, indicating that VAPO effectively strengthens the contribution of visual cues to reasoning process. The benefit brought by this is directly reflected in accuracy, where in contrast to the baseline which exhibits a sharp performance decline, our method achieves steadily increasing accuracy.
+- Qwen2.5-VL-7B-Instruct：https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct
+- ViRL39K（VAPO 训练数据来源）：https://huggingface.co/datasets/TIGER-Lab/ViRL39K
+- Qwen3.5（可选扩展目标）：https://qwen.ai/blog?id=qwen3.5
 
-# Getting Started🚀
+### 评测基准
 
-## Installation
+- HallusionBench：https://github.com/tianyi-lab/HallusionBench
+- MMStar：https://github.com/MMStar-Benchmark/MMStar
+- MathVista：https://github.com/lupantech/MathVista
+- VLMEvalKit（评测框架，本仓库已内置 `vlmeval/`）：https://github.com/open-compass/VLMEvalKit
+
+---
+
+# 快速上手
+
+## 安装
 
 **Requirements:** Python ≥ 3.9, CUDA-compatible GPUs, `torch`, `vllm >= 0.8.0`, `transformers >= 4.51.0`.
 
 ```bash
-git clone https://github.com/xyu-tian/VAPO.git
-cd VAPO
+git clone https://github.com/julia-lars/VAPO_pro.git
+cd VAPO_pro
 pip install -e .
 ```
 
-## Dataset
+## 训练
 
-We release the VAPO training data on Hugging Face. The dataset is curated from [ViRL39K](https://huggingface.co/datasets/TIGER-Lab/ViRL39K) and contains generated visual anchors for probing the perception capability, which are inserted into the reasoning process during training.
-
-| Split | HuggingFace Hub | Size |
-|-------|----------------|------|
-| Train | [🤗 xytian1008/VAPO-Thinker-train36k](https://huggingface.co/datasets/xytian1008/VAPO-Thinker-train36k) | ~36k |
-| Val   | [🤗 xytian1008/VAPO-Thinker-val1k](https://huggingface.co/datasets/xytian1008/VAPO-Thinker-val1k)       | ~1k  |
-
-## Pretrained Models
-
-We release VAPO-Thinker checkpoints on Hugging Face:
-
-| Model | Base | HuggingFace Hub |
-|-------|------|----------------|
-| VAPO-Thinker-7B | Qwen2.5-VL-7B-Instruct | [🤗 xytian1008/VAPO-Thinker-7B](https://huggingface.co/xytian1008/VAPO-Thinker-7B) |
-| VAPO-Thinker-3B | Qwen2.5-VL-3B-Instruct | [🤗 xytian1008/VAPO-Thinker-3B](https://huggingface.co/xytian1008/VAPO-Thinker-3B) |
-
----
-
-## Training
-
-### Quick Start
-
-The fastest way to reproduce the paper's 7B result is to run the provided training script directly. It assumes 8× A100-80G GPUs on a single node.
+7B 训练脚本（官方参考配置：单机 8×A100-80G）：
 
 ```bash
 bash examples/qwen2_5_vl_7b_train36k_vapo.sh
 ```
 
-For the 3B model on 2 GPUs:
+## 评测
+
+评测基于内置的 [VLMEvalKit](https://github.com/open-compass/VLMEvalKit)：
 
 ```bash
-bash examples/qwen2_5_vl_3b_virl36k_vapo.sh
+python run.py --model <模型名> --data HallusionBench MMStar MathVista
 ```
+
+`python run.py --help` 可查看支持的模型与数据集列表。VAPO-Thinker 为标准 Qwen2.5-VL checkpoint，可直接用 transformers / vLLM 加载推理。
 
 ---
-
-## Inference
-
-VAPO-Thinker models are standard Qwen2.5-VL checkpoints and can be run with any Qwen2.5-VL-compatible inference stack.
-
-### Using Transformers
-
-```python
-from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
-from qwen_vl_utils import process_vision_info
-
-model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-    "xytian1008/VAPO-Thinker-7B",   # or a local checkpoint path
-    torch_dtype="auto",
-    device_map="auto",
-)
-processor = AutoProcessor.from_pretrained("xytian1008/VAPO-Thinker-7B")
-
-messages = [
-    {
-        "role": "user",
-        "content": [
-            {"type": "image", "image": "path/to/image.jpg"},
-            {"type": "text", "text": "Your question here.\n\nYou first think through the reasoning process as an internal monologue, enclosed within <think> </think> tags. Then, provide your final answer enclosed within \\boxed{}."},
-        ],
-    }
-]
-
-text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-image_inputs, video_inputs = process_vision_info(messages)
-inputs = processor(text=[text], images=image_inputs, return_tensors="pt").to(model.device)
-
-output_ids = model.generate(**inputs, max_new_tokens=2048)
-trimmed = output_ids[:, inputs["input_ids"].shape[1]:]
-response = processor.batch_decode(trimmed, skip_special_tokens=True)[0]
-print(response)
-```
-
-### Using vLLM
-
-```python
-from vllm import LLM, SamplingParams
-
-llm = LLM(
-    model="xytian1008/VAPO-Thinker-7B",
-    dtype="bfloat16",
-    max_model_len=8192,
-)
-sampling_params = SamplingParams(temperature=0.0, max_tokens=2048)
-
-prompt = (
-    "<|im_start|>user\n"
-    "<|vision_start|><|image_pad|><|vision_end|>"
-    "Your question here.\n\n"
-    "You first think through the reasoning process as an internal monologue, "
-    "enclosed within <think> </think> tags. Then, provide your final answer enclosed within \\boxed{}."
-    "<|im_end|>\n<|im_start|>assistant\n"
-)
-outputs = llm.generate([{"prompt": prompt, "multi_modal_data": {"image": "path/to/image.jpg"}}], sampling_params)
-print(outputs[0].outputs[0].text)
-```
-
-### Evaluation
-
-Evaluation is handled via [VLMEvalKit](https://github.com/open-compass/VLMEvalKit), which is bundled in this repo. To run the full benchmark suite used in the paper:
-
-```bash
-python run.py \
-    --model VAPO-Thinker-7B \
-    --data MMStar HallusionBench MMMU MMVet MathVerse MathVista LogicVista
-```
-
-Run `python run.py --help` for the full list of supported models and datasets.
-
----
-
-# Acknowledgements🥰
-
-Our implementation is built upon several outstanding open-source frameworks, including Easy-R1 and Verl for training, and VLMEvalKit for evaluation. In addition, we leverage a wide range of publicly available datasets, benchmarks, and pretrained models. We also gratefully acknowledge Lambda GPU Cloud and Maincode for providing computational resources.
 
 # Citation🎓
 
-```
+```bibtex
 @article{tian2025more,
   title={More Thought, Less Accuracy? On the Dual Nature of Reasoning in Vision-Language Models},
   author={Tian, Xinyu and Zou, Shu and Yang, Zhaoyuan and He, Mengqi and Waschkowski, Fabian and Wesemann, Lukas and Tu, Peter and Zhang, Jing},
@@ -191,6 +114,7 @@ Our implementation is built upon several outstanding open-source frameworks, inc
   year={2025}
 }
 ```
+
 # License📄
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
